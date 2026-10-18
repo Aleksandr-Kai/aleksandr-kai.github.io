@@ -311,5 +311,20 @@ var nav=(navigator.language||"").slice(0,2);
 apply(saved||(/^(ru|uk|be|kk|ky)$/.test(nav)?"ru":"en"));
 })();
 </script>
+<script>
+(function(){
+var skip=false;
+try{
+if(location.hash==="#nocount")localStorage.setItem("no-count","1");
+if(location.hash==="#count")localStorage.removeItem("no-count");
+skip=localStorage.getItem("no-count")==="1";
+}catch(e){}
+if(skip||/^(localhost|127\.0\.0\.1|)$/.test(location.hostname))return;
+var g=document.createElement("script");
+g.async=true;g.src="https://gc.zgo.at/count.js";
+g.setAttribute("data-goatcounter","https://aleksandr-kai.goatcounter.com/count");
+document.head.appendChild(g);
+})();
+</script>
 </body>
 </html>
