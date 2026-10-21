@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Эмулятор мессенджера</title>
+<script src="i18n.js"></script>
+<script>document.documentElement.dataset.theme=localStorage.getItem("aicrm_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");addEventListener("storage",e=>{if(e.key==="aicrm_theme")document.documentElement.dataset.theme=e.newValue})</script>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: var(--dock); display: grid; place-items: center; min-height: 100vh; padding: 16px; }
+  .phone { width: 400px; max-width: 100%; height: min(760px, 94vh); background: var(--surface); border-radius: 28px; box-shadow: 0 12px 40px rgba(18,48,46,.3); display: flex; flex-direction: column; overflow: hidden; border: 8px solid var(--side); }
+  .ph-head { background: var(--side); color: #fff; padding: 12px 14px; }
+  .ph-head select, .ph-head input { width: 100%; padding: 7px 9px; border-radius: 8px; border: 0; margin-top: 6px; background: rgba(255,255,255,.12); color: #fff; }
+  .ph-head select { margin-top: 0; margin-bottom: 6px; } .ph-head .r + select { margin-top: 6px; margin-bottom: 0; }
+  .ph-head select option { color: #000; } .ph-head ::placeholder { color: rgba(255,255,255,.55); }
+  .ph-head .r { display: flex; gap: 6px; }
+  .ph-head small { opacity: .8; }
+  .chat { flex: 1; overflow: auto; padding: 12px; background: var(--bg); display: flex; flex-direction: column; gap: 6px; }
+  .chat .m { max-width: 80%; } .chat .m.me { align-self: flex-end; background: var(--primary-l); border-color: transparent; }
+  .chat .m.them { align-self: flex-start; background: var(--surface); }
+  .chat .m .meta { justify-content: flex-end; }
+  .sys { align-self: center; font-size: 12px; color: var(--muted); background: var(--surface); padding: 3px 10px; border-radius: 99px; text-align: center; }
+  .quick { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px 0; background: var(--surface); }
+  .quick button { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+  .quick button:hover { border-color: var(--primary); }
+  .composer { padding: 10px; }
+  .banner { background: var(--danger-l); color: var(--danger); font-size: 12px; padding: 6px 12px; text-align: center; }
+  body.embed { padding: 0; min-height: 0; height: 100vh; }
+  body.embed .phone { height: 100%; width: 100%; border-radius: 0; border: 0; box-shadow: none; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="ph-head">
+    <div><b>Абстрактный мессенджер</b> <small>— эмуляция клиента</small></div>
+    <select id="chats" title="Созданные чаты"></select>
+    <div class="r"><input id="pname" placeholder="Моё имя"><input id="phandle" placeholder="Мой номер или @ник"></div>
+    <select id="target"></select>
+  </div>
+  <div id="banner"></div>
+  <div class="chat" id="chat"></div>
+  <div class="quick" id="quick"></div>
+  <form class="composer" id="form"><input id="text" placeholder="Сообщение" autocomplete="off"><button class="btn primary">➤</button></form>
+</div>
+<script src="core.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+if (location.search.includes('embed')) document.body.classList.add('embed');
+const QUICK = LANG === 'en' ? ['Hello!', 'Do you have white sneakers in size 42?', 'Men’s boots', 'Show me a photo', 'I’d like to order', 'Can I try them on?', 'Connect me to a human', 'Stop mailings'] : ['Здравствуйте!', 'Есть белые кроссовки 42 размера?', 'Мужские ботинки', 'Покажите фото', 'Хочу заказать', 'Можно примерить?', 'Позовите продавца', 'Стоп рассылка'];
+let me = { name: LANG === 'en' ? 'Guest' : 'Гость', handle: '+7 900 111-22-33' };
+try { const pp = JSON.parse(localStorage.getItem('aicrm_persona')); if (pp && pp.lang === LANG) me = { ...me, ...pp }; } catch {}
+$('#pname').value = me.name; $('#phandle').value = me.handle;
+$('#quick').innerHTML = QUICK.map(q => `<button type="button">${q}</button>`).join('');
+
+function savePersona() { me = { name: $('#pname').value.trim() || (LANG === 'en' ? 'Guest' : 'Гость'), handle: $('#phandle').value.trim() }; localStorage.setItem('aicrm_persona', JSON.stringify({ ...me, lang: LANG })); draw(); }
+$('#pname').onchange = $('#phandle').onchange = savePersona;
+$('#target').onchange = draw;
+$('#chats').onchange = () => {      // выбор существующего чата: подставляем собеседника и аккаунт
+  const c = Store.get().chats.find(x => x.id === $('#chats').value);
+  if (!c) return;
+  $('#pname').value = c.name; $('#phandle').value = c.handle; $('#target').value = c.accountId;
+  savePersona();
+};
+
+function send(text) {
+  text = text.trim(); const accId = $('#target').value;
+  if (!text) return;
+  if (!accId) return alert('Нет аккаунтов: добавьте их в основном приложении (вкладка «Мессенджеры»).');
+  if (!me.handle) return $('#phandle').focus();
+  Store.update(s => {
+    const chat = getChat(s, accId, me.handle, me.name);
+    chat.name = me.name;
+    addClientFromChat(s, accId, me.handle, me.name);
+    chat.messages.push({ id: uid(), from: 'client', text, ts: Date.now(), status: 'delivered', handled: false });
+    chat.lastTs = Date.now(); chat.unread = (chat.unread || 0) + 1;
+  });
+}
+$('#form').onsubmit = e => { e.preventDefault(); send($('#text').value); $('#text').value = ''; };
+$('#quick').onclick = e => { if (e.target.tagName === 'BUTTON') send(e.target.textContent); };
+
+function draw() {
+  const st = Store.get(), sel = $('#target'), prev = sel.value;
+  sel.innerHTML = st.accounts.length ? st.accounts.map(a => `<option value="${a.id}">Написать: ${typeName(a.type)} · ${esc(accLabel(a))}${a.enabled ? '' : ' (офлайн)'}</option>`).join('') : '<option value="">Нет подключённых аккаунтов</option>';
+  if (st.accounts.some(a => a.id === prev)) sel.value = prev;
+  const acc = st.accounts.find(a => a.id === sel.value);
+  const cs = $('#chats'), cur = st.chats.find(c => c.accountId === sel.value && c.handle === me.handle);
+  cs.innerHTML = `<option value="">${st.chats.length ? 'Чаты: выберите существующий или введите нового' : 'Чатов пока нет — напишите первое сообщение'}</option>`
+    + [...st.chats].sort((a, b) => b.lastTs - a.lastTs).map(c => `<option value="${c.id}">${esc(c.name)} · ${esc(c.handle)} — ${typeName(st.accounts.find(a => a.id === c.accountId)?.type)} ${esc(accLabel(st.accounts.find(a => a.id === c.accountId)))}</option>`).join('');
+  cs.value = cur ? cur.id : '';
+  const alive = Date.now() - (+localStorage.getItem('aicrm_alive') || 0) < 4000;
+  $('#banner').innerHTML = !alive ? '<div class="banner">Основное приложение закрыто — автоответы не обрабатываются. Откройте страницу демо заново.</div>'
+    : acc && !acc.enabled ? '<div class="banner">Аккаунт выключен — сообщения доставляются, но не прочитываются</div>'
+    : acc && acc.blockAll ? '<div class="banner">Аккаунт не может отправлять сообщения (запрет в настройках)</div>' : '';
+  const chat = acc && st.chats.find(c => c.accountId === acc.id && c.handle === me.handle);
+  const box = $('#chat'), near = box.scrollHeight - box.scrollTop - box.clientHeight < 80, key = acc?.id + me.handle;
+  const msgs = chat ? chat.messages.filter(m => m.from !== 'system') : [];
+  box.innerHTML = (msgs.length ? '' : '<div class="sys">Напишите сообщение, чтобы начать диалог</div>')
+    + msgs.map(m => {
+      const mine = m.from === 'client';
+      return `<div class="m ${mine ? 'me' : 'them'}">${msgPhoto(m)}<div>${esc(m.text)}</div><div class="meta">${m.kind === 'broadcast' ? '<span>Рассылка</span>' : ''}<span>${fmtTime(m.ts)}</span>${mine ? `<span>${m.status === 'read' ? '✓✓' : '✓'}</span>` : ''}</div></div>`;
+    }).join('') + (chat?.typing ? '<div class="sys">печатает…</div>' : '');
+  if (near || box.dataset.k !== key) box.scrollTop = box.scrollHeight;
+  box.dataset.k = key;
+}
+Store.on(draw);
+setInterval(draw, 2000);
+draw();
+</script>
+</body>
+</html>
